@@ -1,0 +1,3 @@
+[submodule "gnnexp"]
+	path = gnnexp
+	url = https://github.com/RexYing/gnn-model-explainer

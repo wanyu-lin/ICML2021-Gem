@@ -1,0 +1,877 @@
+﻿diff --git a/configs.py b/configs.py
+index c727faf..cbfa7ed 100644
+--- a/configs.py
++++ b/configs.py
+@@ -1,10 +1,10 @@
+ import argparse
+ import utils.parser_utils as parser_utils
+-    
++
+ def arg_parse():
+     parser = argparse.ArgumentParser(description='GraphPool arguments.')
+     io_parser = parser.add_mutually_exclusive_group(required=False)
+-    io_parser.add_argument('--dataset', dest='dataset', 
++    io_parser.add_argument('--dataset', dest='dataset',
+             help='Input dataset.')
+     benchmark_parser = io_parser.add_argument_group()
+     benchmark_parser.add_argument('--bmname', dest='bmname',
+@@ -71,6 +71,8 @@ def arg_parse():
+             help='Method. Possible values: base, ')
+     parser.add_argument('--name-suffix', dest='name_suffix',
+             help='suffix added to the output filename')
++    parser.add_argument("--graph-feat", dest="graph_feat",
++            help="node features for graph classification task.")
+ 
+     parser.set_defaults(datadir='data', # io_parser
+                         logdir='log',
+@@ -98,6 +100,7 @@ def arg_parse():
+                         method='base',
+                         name_suffix='',
+                         assign_ratio=0.1,
++                        graph_feat="node-label"
+                        )
+     return parser.parse_args()
+ 
+diff --git a/explainer/explain.py b/explainer/explain.py
+index 0f00c4c..344a6f7 100644
+--- a/explainer/explain.py
++++ b/explainer/explain.py
+@@ -68,6 +68,7 @@ class Explainer:
+         self.args = args
+         self.writer = writer
+         self.print_training = print_training
++        self.device = torch.device(self.args.cuda if self.args.gpu and torch.cuda.is_available() else "cpu")
+ 
+ 
+     # Main method
+@@ -112,11 +113,11 @@ class Explainer:
+             label=label,
+             args=self.args,
+             writer=self.writer,
+-            graph_idx=self.graph_idx,
++            graph_idx=graph_idx,
+             graph_mode=self.graph_mode,
+         )
+         if self.args.gpu:
+-            explainer = explainer.cuda()
++            explainer = explainer.to(self.device)
+ 
+         self.model.eval()
+ 
+@@ -166,14 +167,6 @@ class Explainer:
+                         explainer.optimizer.param_groups[0]["lr"],
+                         epoch,
+                     )
+-                    if epoch % 25 == 0:
+-                        explainer.log_mask(epoch)
+-                        explainer.log_masked_adj(
+-                            node_idx_new, epoch, label=single_subgraph_label
+-                        )
+-                        explainer.log_adj_grad(
+-                            node_idx_new, pred_label, epoch, label=single_subgraph_label
+-                        )
+ 
+                     if epoch == 0:
+                         if self.model.att:
+@@ -181,7 +174,7 @@ class Explainer:
+                             print("adj att size: ", adj_atts.size())
+                             adj_att = torch.sum(adj_atts[0], dim=2)
+                             # adj_att = adj_att[neighbors][:, neighbors]
+-                            node_adj_att = adj_att * adj.float().cuda()
++                            node_adj_att = adj_att * adj.float().to(self.device)
+                             io_utils.log_matrix(
+                                 self.writer, node_adj_att[0], "att/matrix", epoch
+                             )
+@@ -212,12 +205,17 @@ class Explainer:
+             else:
+                 adj_atts = nn.functional.sigmoid(adj_atts).squeeze()
+                 masked_adj = adj_atts.cpu().detach().numpy() * sub_adj.squeeze()
+-
+-        fname = 'masked_adj_' + io_utils.gen_explainer_prefix(self.args) + (
+-                'node_idx_'+str(node_idx)+'graph_idx_'+str(self.graph_idx)+'.npy')
+-        with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
++        fname = 'masked_adj_' + (
++                'node_idx_'+str(node_idx)+'graph_idx_'+str(graph_idx)+'.npy')
++        with open(os.path.join(self.args.logdir, io_utils.gen_explainer_prefix(self.args), fname), 'wb') as outfile:
+             np.save(outfile, np.asarray(masked_adj.copy()))
+             print("Saved adjacency matrix to ", fname)
++        data = {
++            'label': label,
++            'adj': masked_adj,
++            'node_idx': neighbors
++        }
++        torch.save(data, os.path.join(self.args.logdir, io_utils.gen_explainer_prefix(self.args), fname[:-3]+'ckpt'))
+         return masked_adj
+ 
+ 
+@@ -297,6 +295,7 @@ class Explainer:
+             self.explain(node_idx, graph_idx=graph_idx, model=model)
+             for node_idx in node_indices
+         ]
++        return masked_adjs
+         # pdb.set_trace()
+         graphs = []
+         feats = []
+@@ -380,7 +379,7 @@ class Explainer:
+             masked_adjs.append(masked_adj)
+ 
+             G_orig = io_utils.denoise_graph(
+-                self.adj[graph_idx],
++                self.adj[graph_idx].numpy(),
+                 0,
+                 feat=self.feat[graph_idx],
+                 threshold=None,
+@@ -473,7 +472,7 @@ class Explainer:
+         x = torch.tensor(self.feat, requires_grad=True, dtype=torch.float)
+         label = torch.tensor(self.label, dtype=torch.long)
+         if self.args.gpu:
+-            adj, x, label = adj.cuda(), x.cuda(), label.cuda()
++            adj, x, label = adj.to(self.device), x.to(self.device), label.to(self.device)
+ 
+         preds, _ = self.model(x, adj)
+         preds.retain_grad()
+@@ -484,7 +483,7 @@ class Explainer:
+         pred_idx = np.expand_dims(np.argmax(self.pred, axis=2), axis=2)
+         pred_idx = torch.LongTensor(pred_idx)
+         if self.args.gpu:
+-            pred_idx = pred_idx.cuda()
++            pred_idx = pred_idx.to(self.device)
+         self.alpha = self.preds_grad
+ 
+ 
+@@ -612,12 +611,13 @@ class ExplainModule(nn.Module):
+ 
+         self.feat_mask = self.construct_feat_mask(x.size(-1), init_strategy="constant")
+         params = [self.mask, self.feat_mask]
++        self.device = torch.device(self.args.cuda if self.args.gpu and torch.cuda.is_available() else "cpu")
+         if self.mask_bias is not None:
+             params.append(self.mask_bias)
+         # For masking diagonal entries
+         self.diag_mask = torch.ones(num_nodes, num_nodes) - torch.eye(num_nodes)
+         if args.gpu:
+-            self.diag_mask = self.diag_mask.cuda()
++            self.diag_mask = self.diag_mask.to(self.device)
+ 
+         self.scheduler, self.optimizer = train_utils.build_optimizer(args, params)
+ 
+@@ -669,7 +669,7 @@ class ExplainModule(nn.Module):
+         elif self.mask_act == "ReLU":
+             sym_mask = nn.ReLU()(self.mask)
+         sym_mask = (sym_mask + sym_mask.t()) / 2
+-        adj = self.adj.cuda() if self.args.gpu else self.adj
++        adj = self.adj.to(self.device) if self.args.gpu else self.adj
+         masked_adj = adj * sym_mask
+         if self.args.mask_bias:
+             bias = (self.mask_bias + self.mask_bias.t()) / 2
+@@ -683,7 +683,7 @@ class ExplainModule(nn.Module):
+         return mask_sum / adj_sum
+ 
+     def forward(self, node_idx, unconstrained=False, mask_features=True, marginalize=False):
+-        x = self.x.cuda() if self.args.gpu else self.x
++        x = self.x.to(self.device) if self.args.gpu else self.x
+ 
+         if unconstrained:
+             sym_mask = torch.sigmoid(self.mask) if self.use_sigmoid else self.mask
+@@ -722,9 +722,9 @@ class ExplainModule(nn.Module):
+             self.adj.grad.zero_()
+             self.x.grad.zero_()
+         if self.args.gpu:
+-            adj = self.adj.cuda()
+-            x = self.x.cuda()
+-            label = self.label.cuda()
++            adj = self.adj.to(self.device)
++            x = self.x.to(self.device)
++            label = self.label.to(self.device)
+         else:
+             x, adj = self.x, self.adj
+         ypred, _ = self.model(x, adj)
+@@ -782,8 +782,8 @@ class ExplainModule(nn.Module):
+         L = D - m_adj
+         pred_label_t = torch.tensor(pred_label, dtype=torch.float)
+         if self.args.gpu:
+-            pred_label_t = pred_label_t.cuda()
+-            L = L.cuda()
++            pred_label_t = pred_label_t.to(self.device)
++            L = L.to(self.device)
+         if self.graph_mode:
+             lap_loss = 0
+         else:
+diff --git a/explainer_main.py b/explainer_main.py
+index 77adf9b..b40e26a 100644
+--- a/explainer_main.py
++++ b/explainer_main.py
+@@ -9,16 +9,30 @@ import sklearn.metrics as metrics
+ 
+ from tensorboardX import SummaryWriter
+ 
++import sys
+ import pickle
+ import shutil
+ import torch
++import random
++import numpy as np
+ 
+ import models
+ import utils.io_utils as io_utils
+ import utils.parser_utils as parser_utils
+ from explainer import explain
+ 
++os.environ["CUDA_VISIBLE_DEVICES"] = '0'
++torch.backends.cudnn.deterministic = True
++torch.backends.cudnn.benchmark = False
+ 
++(torch.__version__)
++
++(torch.cuda.current_device())
++(torch.cuda.device(0))
++(torch.cuda.device_count())
++(torch.cuda.get_device_name(0))
++(torch.cuda.is_available())
++(torch.cuda.current_device())
+ 
+ def arg_parse():
+     parser = argparse.ArgumentParser(description="GNN Explainer arguments.")
+@@ -82,7 +96,7 @@ def arg_parse():
+         action="store_const",
+         const=False,
+         default=True,
+-        help="Whether to add bias. Default to True.",
++        help="Whether to do SummaryWriter. Default to True.",
+     )
+     # Explainer
+     parser.add_argument("--mask-act", dest="mask_act", type=str, help="sigmoid, ReLU.")
+@@ -138,15 +152,22 @@ def arg_parse():
+         dest="explainer_suffix",
+         help="suffix added to the explainer log",
+     )
++    parser.add_argument(
++        "--seed",
++        dest="seed",
++        type=int,
++        default=0,
++        help="Random seed.",
++    )
+ 
+     # TODO: Check argument usage
+     parser.set_defaults(
+         logdir="log",
+         ckptdir="ckpt",
+         dataset="syn1",
+-        opt="adam",  
++        opt="adam",
+         opt_scheduler="none",
+-        cuda="0",
++        cuda="cuda:0",
+         lr=0.1,
+         clip=2.0,
+         batch_size=20,
+@@ -171,14 +192,17 @@ def arg_parse():
+ def main():
+     # Load a configuration
+     prog_args = arg_parse()
+-
++    torch.manual_seed(prog_args.seed)
++    np.random.seed(prog_args.seed)
++    random.seed(prog_args.seed)
++    device = torch.device(prog_args.cuda if prog_args.gpu and torch.cuda.is_available() else "cpu")
+     if prog_args.gpu:
+-        os.environ["CUDA_VISIBLE_DEVICES"] = prog_args.cuda
++        os.environ["CUDA_VISIBLE_DEVICES"] = prog_args.cuda.split(':')[-1]
+         print("CUDA", prog_args.cuda)
+     else:
+         print("Using CPU")
+ 
+-    # Configure the logging directory 
++    # Configure the logging directory
+     if prog_args.writer:
+         path = os.path.join(prog_args.logdir, io_utils.gen_explainer_prefix(prog_args))
+         if os.path.isdir(path) and prog_args.clean_log:
+@@ -192,7 +216,7 @@ def main():
+     # Load a model checkpoint
+     ckpt = io_utils.load_ckpt(prog_args)
+     cg_dict = ckpt["cg"] # get computation graph
+-    input_dim = cg_dict["feat"].shape[2] 
++    input_dim = cg_dict["feat"].shape[2]
+     num_classes = cg_dict["pred"].shape[2]
+     print("Loaded model from {}".format(prog_args.ckptdir))
+     print("input dim: ", input_dim, "; num classes: ", num_classes)
+@@ -206,7 +230,7 @@ def main():
+ 
+     # build model
+     print("Method: ", prog_args.method)
+-    if graph_mode: 
++    if graph_mode:
+         # Explain Graph prediction
+         model = models.GcnEncoderGraph(
+             input_dim=input_dim,
+@@ -220,7 +244,7 @@ def main():
+     else:
+         if prog_args.dataset == "ppi_essential":
+             # class weight in CE loss for handling imbalanced label classes
+-            prog_args.loss_weight = torch.tensor([1.0, 5.0], dtype=torch.float).cuda() 
++            prog_args.loss_weight = torch.tensor([1.0, 5.0], dtype=torch.float).to(device)
+         # Explain Node prediction
+         model = models.GcnEncoderNode(
+             input_dim=input_dim,
+@@ -232,9 +256,9 @@ def main():
+             args=prog_args,
+         )
+     if prog_args.gpu:
+-        model = model.cuda()
++        model = model.to(device)
+     # load state_dict (obtained by model.state_dict() when saving checkpoint)
+-    model.load_state_dict(ckpt["model_state"]) 
++    model.load_state_dict(ckpt["model_state"])
+ 
+     # Create explainer
+     explainer = explain.Explainer(
+@@ -252,7 +276,7 @@ def main():
+     )
+ 
+     # TODO: API should definitely be cleaner
+-    # Let's define exactly which modes we support 
++    # Let's define exactly which modes we support
+     # We could even move each mode to a different method (even file)
+     if prog_args.explain_node is not None:
+         explainer.explain(prog_args.explain_node, unconstrained=False)
+@@ -276,8 +300,8 @@ def main():
+             explainer.explain_graphs(graph_indices=graph_indices)
+ 
+         elif prog_args.graph_idx == -1:
+-            # just run for a customized set of indices
+-            explainer.explain_graphs(graph_indices=[1, 2, 3, 4])
++            # For saving time, only explain graphs in test set.
++            explainer.explain_graphs(graph_indices=cg_dict['test_idx'])
+         else:
+             explainer.explain(
+                 node_idx=0,
+@@ -308,10 +332,11 @@ def main():
+ 
+         else:
+             # explain a set of nodes
++            # Do not explain the node labeled as class 0 and 4.
++            # These nodes are randomly added in synthetic dataset.
+             masked_adj = explainer.explain_nodes_gnn_stats(
+-                range(400, 700, 5), prog_args
++                [i for i, label in enumerate(cg_dict["label"][0]) if label not in [0, 4] ], prog_args
+             )
+ 
+ if __name__ == "__main__":
+     main()
+-
+diff --git a/train.py b/train.py
+index 7c12912..d2f68b3 100644
+--- a/train.py
++++ b/train.py
+@@ -37,7 +37,22 @@ import utils.graph_utils as graph_utils
+ 
+ import models
+ 
+-
++import os
++os.environ["CUDA_VISIBLE_DEVICES"] = '0'
++torch.manual_seed(0)
++np.random.seed(0)
++random.seed(0)
++torch.backends.cudnn.deterministic = True
++torch.backends.cudnn.benchmark = False
++
++(torch.__version__)
++
++(torch.cuda.current_device())
++(torch.cuda.device(0))
++(torch.cuda.device_count())
++(torch.cuda.get_device_name(0))
++(torch.cuda.is_available())
++(torch.cuda.current_device())
+ #############################
+ #
+ # Prepare Data
+@@ -140,7 +155,6 @@ def train(
+     mask_nodes=True,
+ ):
+     writer_batch_idx = [0, 3, 6, 9]
+-
+     optimizer = torch.optim.Adam(
+         filter(lambda p: p.requires_grad, model.parameters()), lr=0.001
+     )
+@@ -159,35 +173,20 @@ def train(
+         begin_time = time.time()
+         avg_loss = 0.0
+         model.train()
+-        predictions = []
+-        print("Epoch: ", epoch)
++
+         for batch_idx, data in enumerate(dataset):
+             model.zero_grad()
+-            if batch_idx == 0:
+-                prev_adjs = data["adj"]
+-                prev_feats = data["feats"]
+-                prev_labels = data["label"]
+-                all_adjs = prev_adjs
+-                all_feats = prev_feats
+-                all_labels = prev_labels
+-            elif batch_idx < 20:
+-                prev_adjs = data["adj"]
+-                prev_feats = data["feats"]
+-                prev_labels = data["label"]
+-                all_adjs = torch.cat((all_adjs, prev_adjs), dim=0)
+-                all_feats = torch.cat((all_feats, prev_feats), dim=0)
+-                all_labels = torch.cat((all_labels, prev_labels), dim=0)
+-            adj = Variable(data["adj"].float(), requires_grad=False).cuda()
+-            h0 = Variable(data["feats"].float(), requires_grad=False).cuda()
+-            label = Variable(data["label"].long()).cuda()
++            device = torch.device(args.cuda if args.gpu and torch.cuda.is_available() else "cpu")
++            adj = Variable(data["adj"].float(), requires_grad=False).to(device)
++            h0 = Variable(data["feats"].float(), requires_grad=False).to(device)
++            label = Variable(data["label"].long()).to(device)
+             batch_num_nodes = data["num_nodes"].int().numpy() if mask_nodes else None
+             assign_input = Variable(
+                 data["assign_feats"].float(), requires_grad=False
+-            ).cuda()
++            ).to(device)
+ 
+             ypred, att_adj = model(h0, adj, batch_num_nodes, assign_x=assign_input)
+-            if batch_idx < 5:
+-                predictions += ypred.cpu().detach().numpy().tolist()
++            # if batch_idx < 5:
+ 
+             if not args.method == "soft-assign" or not args.linkpred:
+                 loss = model.loss(ypred, label)
+@@ -205,7 +204,7 @@ def train(
+             writer.add_scalar("loss/avg_loss", avg_loss, epoch)
+             if args.linkpred:
+                 writer.add_scalar("loss/linkpred_loss", model.link_loss, epoch)
+-        print("Avg loss: ", avg_loss, "; epoch time: ", elapsed)
++        print("Avg loss: ", avg_loss.item(), "; epoch time: ", elapsed)
+         result = evaluate(dataset, model, args, name="Train", max_num_examples=100)
+         train_accs.append(result["acc"])
+         train_epochs.append(epoch)
+@@ -215,7 +214,7 @@ def train(
+         if val_result["acc"] > best_val_result["acc"] - 1e-7:
+             best_val_result["acc"] = val_result["acc"]
+             best_val_result["epoch"] = epoch
+-            best_val_result["loss"] = avg_loss
++            best_val_result["loss"] = avg_loss.item()
+         if test_dataset is not None:
+             test_result = evaluate(test_dataset, model, args, name="Test")
+             test_result["epoch"] = epoch
+@@ -244,18 +243,51 @@ def train(
+     else:
+         plt.plot(best_val_epochs, best_val_accs, "bo")
+         plt.legend(["train", "val"])
+-    plt.savefig(io_utils.gen_train_plt_name(args), dpi=600)
++    plt.savefig(io_utils.gen_prefix(args) + ".png", dpi=600)
+     plt.close()
+     matplotlib.style.use("default")
+ 
++    def collect(dataset):
++        results = []
++        for batch_idx, data in enumerate(dataset):
++            device = torch.device(args.cuda if args.gpu and torch.cuda.is_available() else "cpu")
++            adj = Variable(data["adj"].float(), requires_grad=False).to(device)
++            h0 = Variable(data["feats"].float(), requires_grad=False).to(device)
++            label = Variable(data["label"].long()).to(device)
++            batch_num_nodes = data["num_nodes"].int().numpy() if mask_nodes else None
++            assign_input = Variable(
++                data["assign_feats"].float(), requires_grad=False
++            ).to(device)
++
++            ypred, att_adj = model(h0, adj, batch_num_nodes, assign_x=assign_input)
++            results += [[data["adj"], data["feats"], data["label"], data["gid"], ypred]]
++        return results
++        
++    with torch.no_grad():
++        results = collect(dataset)
++        train_idx = len(results)
++        results += collect(val_dataset)
++        val_idx = len(results)
++        results += collect(test_dataset)
++        test_idx = len(results)
++        all_adjs, all_feats, all_labels, all_gids, predictions = zip(*results)
++        all_adjs = torch.cat(all_adjs, dim=0)
++        all_feats = torch.cat(all_feats, dim=0)
++        all_labels = torch.cat(all_labels, dim=0)
++        all_gids = torch.cat(all_gids, dim=0)
++        predictions = torch.cat(predictions, dim=0).cpu().numpy()
++
+     print(all_adjs.shape, all_feats.shape, all_labels.shape)
+ 
+     cg_data = {
+         "adj": all_adjs,
+         "feat": all_feats,
+         "label": all_labels,
++        "gid": all_gids,
+         "pred": np.expand_dims(predictions, axis=0),
+-        "train_idx": list(range(len(dataset))),
++        "train_idx": list(range(train_idx)),
++        "val_idx": list(range(train_idx, val_idx)),
++        "test_idx": list(range(val_idx, test_idx)),
+     }
+     io_utils.save_checkpoint(model, optimizer, args, num_epochs=-1, cg_dict=cg_data)
+     return model, val_accs
+@@ -263,6 +295,7 @@ def train(
+ 
+ def train_node_classifier(G, labels, model, args, writer=None):
+     # train/test split only for nodes
++    device = torch.device(args.cuda if args.gpu and torch.cuda.is_available() else "cpu")
+     num_nodes = G.number_of_nodes()
+     num_train = int(num_nodes * args.train_ratio)
+     idx = [i for i in range(num_nodes)]
+@@ -285,7 +318,7 @@ def train_node_classifier(G, labels, model, args, writer=None):
+         model.zero_grad()
+ 
+         if args.gpu:
+-            ypred, adj_att = model(x.cuda(), adj.cuda())
++            ypred, adj_att = model(x.to(device), adj.to(device))
+         else:
+             ypred, adj_att = model(x, adj)
+         ypred_train = ypred[:, train_idx, :]
+@@ -302,7 +335,7 @@ def train_node_classifier(G, labels, model, args, writer=None):
+         elapsed = time.time() - begin_time
+ 
+         result_train, result_test = evaluate_node(
+-            ypred.cpu(), data["labels"], train_idx, test_idx
++            ypred.to(device), data["labels"], train_idx, test_idx
+         )
+         if writer is not None:
+             writer.add_scalar("loss/avg_loss", loss, epoch)
+@@ -346,15 +379,16 @@ def train_node_classifier(G, labels, model, args, writer=None):
+     # computation graph
+     model.eval()
+     if args.gpu:
+-        ypred, _ = model(x.cuda(), adj.cuda())
++        ypred, _ = model(x.to(device), adj.to(device))
+     else:
+         ypred, _ = model(x, adj)
+     cg_data = {
+         "adj": data["adj"],
+         "feat": data["feat"],
+         "label": data["labels"],
+-        "pred": ypred.cpu().detach().numpy(),
++        "pred": ypred.to(device).detach().numpy(),
+         "train_idx": train_idx,
++        "test_idx": test_idx,
+     }
+     # import pdb
+     # pdb.set_trace()
+@@ -495,14 +529,15 @@ def evaluate(dataset, model, args, name="Validation", max_num_examples=None):
+ 
+     labels = []
+     preds = []
++    device = torch.device(args.cuda if args.gpu and torch.cuda.is_available() else "cpu")
+     for batch_idx, data in enumerate(dataset):
+-        adj = Variable(data["adj"].float(), requires_grad=False).cuda()
+-        h0 = Variable(data["feats"].float()).cuda()
++        adj = Variable(data["adj"].float(), requires_grad=False).to(device)
++        h0 = Variable(data["feats"].float()).to(device)
+         labels.append(data["label"].long().numpy())
+         batch_num_nodes = data["num_nodes"].int().numpy()
+         assign_input = Variable(
+             data["assign_feats"].float(), requires_grad=False
+-        ).cuda()
++        ).to(device)
+ 
+         ypred, att_adj = model(h0, adj, batch_num_nodes, assign_x=assign_input)
+         _, indices = torch.max(ypred, 1)
+@@ -572,7 +607,9 @@ def ppi_essential_task(args, writer=None):
+         print("Method: attn")
+     else:
+         print("Method:", args.method)
+-        args.loss_weight = torch.tensor([1, 5.0], dtype=torch.float).cuda()
++        args.loss_weight = torch.tensor([1, 5.0], dtype=torch.float)
++        if args.gpu:
++            args.loss_weight = args.loss_weight.cuda()
+         model = models.GcnEncoderNode(
+             input_dim,
+             args.hidden_dim,
+@@ -590,6 +627,7 @@ def ppi_essential_task(args, writer=None):
+ 
+ def syn_task1(args, writer=None):
+     # data
++    device = torch.device(args.cuda if args.gpu and torch.cuda.is_available() else "cpu")
+     G, labels, name = gengraph.gen_syn1(
+         feature_generator=featgen.ConstFeatureGen(np.ones(args.input_dim, dtype=float))
+     )
+@@ -618,7 +656,7 @@ def syn_task1(args, writer=None):
+             args=args,
+         )
+     if args.gpu:
+-        model = model.cuda()
++        model = model.to(device)
+ 
+     train_node_classifier(G, labels, model, args, writer=writer)
+ 
+@@ -866,16 +904,16 @@ def enron_task(args, idx=None, writer=None):
+         print("Running Enron full task")
+ 
+ 
+-def benchmark_task(args, writer=None, feat="node-label"):
++def benchmark_task(args, writer=None):
+     graphs = io_utils.read_graphfile(
+         args.datadir, args.bmname, max_nodes=args.max_nodes
+     )
+     print(max([G.graph["label"] for G in graphs]))
+ 
+-    if feat == "node-feat" and "feat_dim" in graphs[0].graph:
++    if args.graph_feat == "node-feat" and "feat_dim" in graphs[0].graph:
+         print("Using node features")
+         input_dim = graphs[0].graph["feat_dim"]
+-    elif feat == "node-label" and "label" in graphs[0].nodes[0]:
++    elif args.graph_feat == "node-label" and "label" in graphs[0].nodes[0]:
+         print("Using node labels")
+         for G in graphs:
+             for u in G.nodes():
+@@ -883,6 +921,11 @@ def benchmark_task(args, writer=None, feat="node-label"):
+                 # make it -1/1 instead of 0/1
+                 # feat = np.array(G.nodes[u]['label'])
+                 # G.nodes[u]['feat'] = feat * 2 - 1
++    elif args.graph_feat == "node-feat-label" and "feat_dim" in graphs[0].graph and "label" in graphs[0].nodes[0]:
++        print("Using node features and labels")
++        for G in graphs:
++            for u in G.nodes():
++                G.nodes[u]["feat"] = np.concatenate([G.nodes[u]["feat"], np.array(G.nodes[u]["label"])])
+     else:
+         print("Using constant labels")
+         featgen_const = featgen.ConstFeatureGen(np.ones(args.input_dim, dtype=float))
+@@ -909,7 +952,7 @@ def benchmark_task(args, writer=None, feat="node-label"):
+             linkpred=args.linkpred,
+             args=args,
+             assign_input_dim=assign_input_dim,
+-        ).cuda()
++        )
+     else:
+         print("Method: base")
+         model = models.GcnEncoderGraph(
+@@ -921,8 +964,9 @@ def benchmark_task(args, writer=None, feat="node-label"):
+             bn=args.bn,
+             dropout=args.dropout,
+             args=args,
+-        ).cuda()
+-
++        )
++    if args.gpu:
++        model = model.cuda()
+     train(
+         train_dataset,
+         model,
+@@ -969,7 +1013,9 @@ def benchmark_task_val(args, writer=None, feat="node-label"):
+             bn=args.bn,
+             dropout=args.dropout,
+             args=args,
+-        ).cuda()
++        )
++        if args.gpu:
++            model = model.cuda()
+ 
+         _, val_accs = train(
+             train_dataset,
+@@ -986,159 +1032,6 @@ def benchmark_task_val(args, writer=None, feat="node-label"):
+     print(np.max(all_vals))
+     print(np.argmax(all_vals))
+ 
+-
+-def arg_parse():
+-    parser = argparse.ArgumentParser(description="GraphPool arguments.")
+-    io_parser = parser.add_mutually_exclusive_group(required=False)
+-    io_parser.add_argument("--dataset", dest="dataset", help="Input dataset.")
+-    benchmark_parser = io_parser.add_argument_group()
+-    benchmark_parser.add_argument(
+-        "--bmname", dest="bmname", help="Name of the benchmark dataset"
+-    )
+-    io_parser.add_argument("--pkl", dest="pkl_fname", help="Name of the pkl data file")
+-
+-    softpool_parser = parser.add_argument_group()
+-    softpool_parser.add_argument(
+-        "--assign-ratio",
+-        dest="assign_ratio",
+-        type=float,
+-        help="ratio of number of nodes in consecutive layers",
+-    )
+-    softpool_parser.add_argument(
+-        "--num-pool", dest="num_pool", type=int, help="number of pooling layers"
+-    )
+-    parser.add_argument(
+-        "--linkpred",
+-        dest="linkpred",
+-        action="store_const",
+-        const=True,
+-        default=False,
+-        help="Whether link prediction side objective is used",
+-    )
+-
+-    parser_utils.parse_optimizer(parser)
+-
+-    parser.add_argument(
+-        "--datadir", dest="datadir", help="Directory where benchmark is located"
+-    )
+-    parser.add_argument("--logdir", dest="logdir", help="Tensorboard log directory")
+-    parser.add_argument("--ckptdir", dest="ckptdir", help="Model checkpoint directory")
+-    parser.add_argument("--cuda", dest="cuda", help="CUDA.")
+-    parser.add_argument(
+-        "--gpu",
+-        dest="gpu",
+-        action="store_const",
+-        const=True,
+-        default=False,
+-        help="whether to use GPU.",
+-    )
+-    parser.add_argument(
+-        "--max-nodes",
+-        dest="max_nodes",
+-        type=int,
+-        help="Maximum number of nodes (ignore graghs with nodes exceeding the number.",
+-    )
+-    parser.add_argument("--batch-size", dest="batch_size", type=int, help="Batch size.")
+-    parser.add_argument(
+-        "--epochs", dest="num_epochs", type=int, help="Number of epochs to train."
+-    )
+-    parser.add_argument(
+-        "--train-ratio",
+-        dest="train_ratio",
+-        type=float,
+-        help="Ratio of number of graphs training set to all graphs.",
+-    )
+-    parser.add_argument(
+-        "--num_workers",
+-        dest="num_workers",
+-        type=int,
+-        help="Number of workers to load data.",
+-    )
+-    parser.add_argument(
+-        "--feature",
+-        dest="feature_type",
+-        help="Feature used for encoder. Can be: id, deg",
+-    )
+-    parser.add_argument(
+-        "--input-dim", dest="input_dim", type=int, help="Input feature dimension"
+-    )
+-    parser.add_argument(
+-        "--hidden-dim", dest="hidden_dim", type=int, help="Hidden dimension"
+-    )
+-    parser.add_argument(
+-        "--output-dim", dest="output_dim", type=int, help="Output dimension"
+-    )
+-    parser.add_argument(
+-        "--num-classes", dest="num_classes", type=int, help="Number of label classes"
+-    )
+-    parser.add_argument(
+-        "--num-gc-layers",
+-        dest="num_gc_layers",
+-        type=int,
+-        help="Number of graph convolution layers before each pooling",
+-    )
+-    parser.add_argument(
+-        "--bn",
+-        dest="bn",
+-        action="store_const",
+-        const=True,
+-        default=False,
+-        help="Whether batch normalization is used",
+-    )
+-    parser.add_argument("--dropout", dest="dropout", type=float, help="Dropout rate.")
+-    parser.add_argument(
+-        "--nobias",
+-        dest="bias",
+-        action="store_const",
+-        const=False,
+-        default=True,
+-        help="Whether to add bias. Default to True.",
+-    )
+-    parser.add_argument(
+-        "--weight-decay",
+-        dest="weight_decay",
+-        type=float,
+-        help="Weight decay regularization constant.",
+-    )
+-
+-    parser.add_argument(
+-        "--method", dest="method", help="Method. Possible values: base, "
+-    )
+-    parser.add_argument(
+-        "--name-suffix", dest="name_suffix", help="suffix added to the output filename"
+-    )
+-
+-    parser.set_defaults(
+-        datadir="data",  # io_parser
+-        logdir="log",
+-        ckptdir="ckpt",
+-        dataset="syn1",
+-        opt="adam",  # opt_parser
+-        opt_scheduler="none",
+-        max_nodes=100,
+-        cuda="1",
+-        feature_type="default",
+-        lr=0.001,
+-        clip=2.0,
+-        batch_size=20,
+-        num_epochs=1000,
+-        train_ratio=0.8,
+-        test_ratio=0.1,
+-        num_workers=1,
+-        input_dim=10,
+-        hidden_dim=20,
+-        output_dim=20,
+-        num_classes=2,
+-        num_gc_layers=3,
+-        dropout=0.0,
+-        weight_decay=0.005,
+-        method="base",
+-        name_suffix="",
+-        assign_ratio=0.1,
+-    )
+-    return parser.parse_args()
+-
+-
+ def main():
+     prog_args = configs.arg_parse()
+ 
+diff --git a/utils/graph_utils.py b/utils/graph_utils.py
+index 7074044..5486a27 100644
+--- a/utils/graph_utils.py
++++ b/utils/graph_utils.py
+@@ -24,6 +24,7 @@ class GraphSampler(torch.utils.data.Dataset):
+         self.len_all = []
+         self.feature_all = []
+         self.label_all = []
++        self.gid_all = []
+ 
+         self.assign_feat_all = []
+ 
+@@ -45,6 +46,7 @@ class GraphSampler(torch.utils.data.Dataset):
+             self.adj_all.append(adj)
+             self.len_all.append(G.number_of_nodes())
+             self.label_all.append(G.graph["label"])
++            self.gid_all.append(G.graph["id"])
+             # feat matrix: max_num_nodes x feat_dim
+             if features == "default":
+                 f = np.zeros((self.max_num_nodes, self.feat_dim), dtype=float)
+@@ -142,6 +144,7 @@ class GraphSampler(torch.utils.data.Dataset):
+             "label": self.label_all[idx],
+             "num_nodes": num_nodes,
+             "assign_feats": self.assign_feat_all[idx].copy(),
++            "gid": self.gid_all[idx]
+         }
+ 
+ def neighborhoods(adj, n_hops, use_cuda):
+diff --git a/utils/io_utils.py b/utils/io_utils.py
+index a6d4327..5ddad56 100644
+--- a/utils/io_utils.py
++++ b/utils/io_utils.py
+@@ -529,6 +529,7 @@ def read_graphfile(datadir, dataname, max_nodes=None, edge_labels=False):
+ 
+         # add features and labels
+         G.graph["label"] = graph_labels[i - 1]
++        G.graph["id"] = i - 1
+ 
+         # Special label for aromaticity experiment
+         # aromatic_edge = 2
+@@ -548,7 +549,7 @@ def read_graphfile(datadir, dataname, max_nodes=None, edge_labels=False):
+         # relabeling
+         mapping = {}
+         it = 0
+-        if float(nx.__version__) < 2.0:
++        if float(nx.__version__[:2]) < 2.0:
+             for n in G.nodes():
+                 mapping[n] = it
+                 it += 1
