@@ -10,15 +10,26 @@ git apply ../gnnexp.patch
 ```
 
 ## Setup environment
+Create an environment with conda:
 ```sh
 conda create -n gem python=3.8.8
 conda activate gem
+```
+Install PyTorch with CUDA 10.2:
+```sh
 conda install pytorch cudatoolkit=10.2 -c pytorch
+```
+Or install PyTorch WITHOUT CUDA:
+```sh
+conda install pytorch cpuonly -c pytorch
+```
+Install other required packages:
+```sh
 conda install opencv scikit-learn networkx pandas matplotlib seaborn
 pip install tensorboardx
 ```
 
-## Train classification models
+## Train classification models with GNNExplainer's code
 
 ```sh
 cd gnnexp
@@ -51,7 +62,7 @@ python generate_ground_truth.py --dataset=syn4 --top_k=6
 python generate_ground_truth_graph_classification.py --dataset=Mutagenicity --output=mutag --graph-mode --top_k=20
 python generate_ground_truth_graph_classification.py --dataset=NCI1 --output=nci1_dc --graph-mode --top_k=20 --disconnected
 ```
-or
+or you can directly extract from zip file
 ```
 unzip distillation.zip
 ```
