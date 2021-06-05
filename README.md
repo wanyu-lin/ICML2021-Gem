@@ -1,9 +1,21 @@
+# Gem
+
+## Download code and apply patch for GNNExplainer
+```sh
+git clone https://github.com/wanyu-lin/ICML2021-Gem Gem
+cd Gem
+git submodule init
+cd gnnexp
+git apply ../gnnexp.patch
+```
+
 ## Setup environment
 ```sh
-# pytorch 1.3.0 only support python 3.6
-virtualenv --python=python3.6 gem
-source gem/bin/activate
-pip install -r gnnexp/requirements.txt
+conda create -n gem python=3.8.8
+conda activate gem
+conda install pytorch cudatoolkit=10.2 -c pytorch
+conda install opencv scikit-learn networkx pandas matplotlib seaborn
+pip install tensorboardx
 ```
 
 ## Train classification models
