@@ -90,3 +90,18 @@ python test_explained_adj_graph.py --graph-mode --dataset=NCI1 --exp_out=nci1_dc
 
 ## Visualization
 Run `*.ipynb` files in Jupyter Notebook or Jupyter Lab.
+
+
+## Reference
+If you make advantage of Gem in your research, please cite the following in your manuscript:
+
+```
+@inproceedings{
+wanyu-icml21,
+title="{Generative Causal Explanations for Graph Neural Networks}",
+author={Lin, Wanyu and Lan, Hao and Li, Baochun},
+booktitle={International Conference on Machine Learning },
+year={2021},
+url={https://arxiv.org/pdf/2104.06643.pdf},
+}
+```
