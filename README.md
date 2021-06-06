@@ -46,18 +46,6 @@ or you can directly use the checkpoint
 unzip ckpt.zip
 ```
 
-## Generate explaination of classification models with GNNExplainer
-```sh
-python gnnexp/explainer_main.py --dataset=syn1 --logdir=explanation/gnnexp
-python gnnexp/explainer_main.py --dataset=syn4 --logdir=explanation/gnnexp
-python gnnexp/explainer_main.py --dataset=Mutagenicity --graph-mode --logdir=explanation/gnnexp
-python gnnexp/explainer_main.py --dataset=NCI1 --graph-mode --logdir=explanation/gnnexp
-```
-or you can directly unzip the explanation by
-```sh
-unzip gnnexp_explanation.zip
-```
-
 ## Distillation
 ```sh
 python generate_ground_truth.py --dataset=syn1 --top_k=6
@@ -78,7 +66,7 @@ python explainer_gae_graph.py --distillation=mutag_top20 --output=mutag_top20 --
 python explainer_gae_graph.py --distillation=nci1_dc_top20 --output=nci1_dc_top20 --dataset=NCI1 --gpu -b 128 --weighted --gae3 --loss=mse --early_stop --graph_labeling --train_on_positive_label --epochs=300 --lr=0.01
 ```
 
-## Evaluate GNNExplainer and Gem
+## Evaluate Gem
 ```sh
 python test_explained_adj.py --dataset=syn1 --distillation=syn1_top6 --exp_out=syn1_top6 --top_k=6
 python test_explained_adj.py --dataset=syn4 --distillation=syn4_top6 --exp_out=syn4_top6 --top_k=6
