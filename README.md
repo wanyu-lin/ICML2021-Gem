@@ -33,7 +33,7 @@ conda install opencv scikit-learn networkx pandas matplotlib seaborn
 pip install tensorboardx
 ```
 
-## Train classification models with GNNExplainer's code
+## Train classification models
 
 ```sh
 cd gnnexp
@@ -47,7 +47,7 @@ or you can directly use the checkpoint
 unzip ckpt.zip
 ```
 
-## Generate explaination of classification models by GNNExplainer
+## Generate explaination of classification models with GNNExplainer
 ```sh
 python gnnexp/explainer_main.py --dataset=syn1 --logdir=explanation/gnnexp
 python gnnexp/explainer_main.py --dataset=syn4 --logdir=explanation/gnnexp
