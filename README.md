@@ -33,7 +33,7 @@ pip install tensorboardx
 ```
 
 ## Prepare classification models
-See [prepare.md](prepare.md) or extract from zip file:
+See [preparation.md](preparation.md) or extract from zip file:
 ```sh
 unzip ckpt.zip
 unzip gnnexp_explanation.zip
