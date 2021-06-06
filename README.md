@@ -99,7 +99,7 @@ If you make advantage of Gem in your research, please cite the following in your
 wanyu-icml21,
 title="{Generative Causal Explanations for Graph Neural Networks}",
 author={Lin, Wanyu and Lan, Hao and Li, Baochun},
-booktitle={International Conference on Machine Learning },
+booktitle={International Conference on Machine Learning},
 year={2021},
 url={https://arxiv.org/pdf/2104.06643.pdf},
 }
