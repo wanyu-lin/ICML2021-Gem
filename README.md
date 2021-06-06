@@ -1,8 +1,7 @@
 # Gem
-This repo covers the implementation for our paper Gem.
+## This repo covers the implementation for our paper Gem.
 
 Wanyu Lin, Hao Lan, and Baochun Li. "Generative Causal Explanations for Graph Neural Networks (https://arxiv.org/pdf/2104.06643.pdf)," in the Proceedings of the 38th International Conference on Machine Learning (ICML 2021), Online, July 18-24, 2021.
-
 
 ## Download code and apply patch for GNNExplainer
 ```sh
