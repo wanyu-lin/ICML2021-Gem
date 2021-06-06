@@ -3,7 +3,7 @@
 
 Wanyu Lin, Hao Lan, and Baochun Li. "[Generative Causal Explanations for Graph Neural Networks](https://arxiv.org/pdf/2104.06643.pdf)," in the Proceedings of the 38th International Conference on Machine Learning (ICML 2021), Online, July 18-24, 2021.
 
-## Download code and apply patch for GNNExplainer
+## Download code
 ```sh
 git clone https://github.com/wanyu-lin/ICML2021-Gem Gem
 cd Gem
@@ -22,7 +22,7 @@ Install PyTorch with CUDA 10.2:
 ```sh
 conda install pytorch cudatoolkit=10.2 -c pytorch
 ```
-Or install PyTorch WITHOUT CUDA:
+Or install PyTorch without CUDA:
 ```sh
 conda install pytorch cpuonly -c pytorch
 ```
