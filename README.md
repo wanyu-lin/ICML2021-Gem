@@ -22,7 +22,7 @@ Install PyTorch with CUDA 10.2:
 ```sh
 conda install pytorch cudatoolkit=10.2 -c pytorch
 ```
-Or install PyTorch WITHOUT CUDA:
+Or install PyTorch without CUDA:
 ```sh
 conda install pytorch cpuonly -c pytorch
 ```
