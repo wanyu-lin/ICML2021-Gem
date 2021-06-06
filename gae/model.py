@@ -27,11 +27,7 @@ class GCNModelVAE(nn.Module):
 
     def forward(self, x, adj):
         mu, logvar = self.encode(x, adj)
-        # print('mu', mu.shape)
-        # print('logvar', logvar.shape)
         z = self.reparameterize(mu, logvar)
-        # print('x', z.shape)
-        # print('decoded_adj', self.dc(z).shape)
         return self.dc(z), mu, logvar
 
 
@@ -41,12 +37,8 @@ class GCNModelVAE3(GCNModelVAE):
         self.gc1_1 = GraphConvolution(hidden_dim1, hidden_dim1, dropout, act=F.relu)
 
     def encode(self, x, adj):
-        # print('x', x.shape)
-        # print('adj', adj.shape)
         hidden1 = self.gc1(x, adj)
-        # print('hidden1', hidden1.shape)
         hidden2 = self.gc1_1(hidden1, adj)
-        # print('hidden2', hidden2.shape)
         return self.gc2(hidden2, adj), self.gc3(hidden2, adj)
 
 
