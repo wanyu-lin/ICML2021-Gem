@@ -1,7 +1,7 @@
 # Gem
 ## This repo covers the implementation for our paper Gem.
 
-Wanyu Lin, Hao Lan, and Baochun Li. "Generative Causal Explanations for Graph Neural Networks (https://arxiv.org/pdf/2104.06643.pdf)," in the Proceedings of the 38th International Conference on Machine Learning (ICML 2021), Online, July 18-24, 2021.
+Wanyu Lin, Hao Lan, and Baochun Li. "[Generative Causal Explanations for Graph Neural Networks](https://arxiv.org/pdf/2104.06643.pdf)," in the Proceedings of the 38th International Conference on Machine Learning (ICML 2021), Online, July 18-24, 2021.
 
 ## Download code and apply patch for GNNExplainer
 ```sh
@@ -32,18 +32,11 @@ conda install opencv scikit-learn networkx pandas matplotlib seaborn
 pip install tensorboardx
 ```
 
-## Train classification models
-
-```sh
-cd gnnexp
-python gnnexp/train.py --dataset=syn1
-python gnnexp/train.py --dataset=syn4
-python gnnexp/train.py --bmname=Mutagenicity
-python gnnexp/train.py --bmname=NCI1
-```
-or you can directly use the checkpoint
+## Prepare classification models
+See [prepare.md](prepare.md) or extract from zip file:
 ```sh
 unzip ckpt.zip
+unzip gnnexp_explanation.zip
 ```
 
 ## Distillation
@@ -74,7 +67,6 @@ python test_explained_adj_graph.py --graph-mode --dataset=Mutagenicity --exp_out
 python test_explained_adj_graph.py --graph-mode --dataset=NCI1 --exp_out=nci1_dc_top20 --distillation=nci1_dc_top20 --top_k=15 --test_out=nci1_dc_top20_top15
 ```
 
-
 ## Visualization
 Run `*.ipynb` files in Jupyter Notebook or Jupyter Lab.
 
@@ -84,11 +76,11 @@ If you make advantage of Gem in your research, please cite the following in your
 
 ```
 @inproceedings{
-wanyu-icml21,
-title="{Generative Causal Explanations for Graph Neural Networks}",
-author={Lin, Wanyu and Lan, Hao and Li, Baochun},
-booktitle={International Conference on Machine Learning},
-year={2021},
-url={https://arxiv.org/pdf/2104.06643.pdf},
+    wanyu-icml21,
+    title="{Generative Causal Explanations for Graph Neural Networks}",
+    author={Lin, Wanyu and Lan, Hao and Li, Baochun},
+    booktitle={International Conference on Machine Learning},
+    year={2021},
+    url={https://arxiv.org/pdf/2104.06643.pdf},
 }
 ```
