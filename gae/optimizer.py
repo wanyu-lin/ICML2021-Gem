@@ -9,7 +9,6 @@ def loss_function(preds, labels, mu, logvar, n_nodes, norm, pos_weight):
         cost += [F.binary_cross_entropy_with_logits(preds[idx], labels[idx], pos_weight=pos_weight[idx])]
     cost = norm * torch.stack(cost)
 
-    # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
