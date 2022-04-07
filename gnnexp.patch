@@ -480,7 +480,7 @@ index 7c12912..d2f68b3 100644
 +            ypred, att_adj = model(h0, adj, batch_num_nodes, assign_x=assign_input)
 +            results += [[data["adj"], data["feats"], data["label"], data["gid"], ypred]]
 +        return results
-+        
++
 +    with torch.no_grad():
 +        results = collect(dataset)
 +        train_idx = len(results)

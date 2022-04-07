@@ -10,7 +10,7 @@ cd Gem
 git submodule init
 git submodule update
 cd gnnexp
-git apply ../gnnexp.patch
+git apply --ignore-space-change --ignore-whitespace ../gnnexp.patch
 ```
 
 ## Setup environment
