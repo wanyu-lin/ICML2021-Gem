@@ -8,6 +8,7 @@ Wanyu Lin, Hao Lan, and Baochun Li. "[Generative Causal Explanations for Graph N
 git clone https://github.com/wanyu-lin/ICML2021-Gem Gem
 cd Gem
 git submodule init
+git submodule update
 cd gnnexp
 git apply ../gnnexp.patch
 ```
